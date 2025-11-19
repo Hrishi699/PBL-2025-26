@@ -1,0 +1,346 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (accuracy_score, precision_score, recall_score, 
+                             f1_score, confusion_matrix, classification_report, 
+                             roc_auc_score, roc_curve)
+from sklearn.preprocessing import LabelEncoder
+import matplotlib.pyplot as plt
+import seaborn as sns
+import joblib
+import warnings
+warnings.filterwarnings('ignore')
+
+print("=" * 70)
+print("🛡️  PHISHING DETECTION USING RANDOM FOREST 🛡️")
+print("=" * 70)
+
+# Load the dataset
+print("\n📊 Loading dataset...")
+try:
+    df = pd.read_csv('phishing_dataset_2000.csv')
+    print(f"✅ Dataset loaded successfully!")
+    print(f"   Total samples: {len(df)}")
+    print(f"   Features: {len(df.columns) - 2}")  # Excluding 'url' and 'label'
+except FileNotFoundError:
+    print("❌ Error: Dataset file not found!")
+    print("   Please make sure 'phishing_dataset_2000.csv' is in the same directory.")
+    exit()
+
+# Display basic information
+print("\n" + "=" * 70)
+print("📈 Dataset Overview")
+print("=" * 70)
+print(df.head())
+print("\n📊 Dataset Info:")
+print(df.info())
+print("\n📉 Label Distribution:")
+print(df['label'].value_counts())
+print(f"\n✅ Legitimate URLs: {(df['label'] == 'legitimate').sum()}")
+print(f"🚨 Phishing URLs: {(df['label'] == 'phishing').sum()}")
+
+# Check for missing values
+print("\n🔍 Checking for missing values...")
+missing = df.isnull().sum()
+if missing.sum() == 0:
+    print("✅ No missing values found!")
+else:
+    print(f"⚠️  Missing values:\n{missing[missing > 0]}")
+
+# Prepare features and labels
+print("\n" + "=" * 70)
+print("🔧 Preparing Data for Training")
+print("=" * 70)
+
+# Drop the URL column (not needed for training)
+X = df.drop(['url', 'label'], axis=1)
+y = df['label']
+
+# Encode labels (legitimate=0, phishing=1)
+le = LabelEncoder()
+y_encoded = le.fit_transform(y)
+
+print(f"✅ Features shape: {X.shape}")
+print(f"✅ Labels shape: {y_encoded.shape}")
+print(f"\n📋 Feature columns:")
+for i, col in enumerate(X.columns, 1):
+    print(f"   {i}. {col}")
+
+# Split the data
+print("\n📊 Splitting data into train and test sets (80-20 split)...")
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
+)
+
+print(f"✅ Training set: {len(X_train)} samples")
+print(f"✅ Test set: {len(X_test)} samples")
+
+# Feature importance analysis
+print("\n" + "=" * 70)
+print("🌲 Training Random Forest Classifier")
+print("=" * 70)
+
+# Initial model with default parameters
+print("\n⏳ Training initial model...")
+rf_initial = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+rf_initial.fit(X_train, y_train)
+print("✅ Initial model trained!")
+
+# Feature importance
+print("\n📊 Feature Importance:")
+feature_importance = pd.DataFrame({
+    'feature': X.columns,
+    'importance': rf_initial.feature_importances_
+}).sort_values('importance', ascending=False)
+
+print(feature_importance.to_string(index=False))
+
+# Cross-validation
+print("\n" + "=" * 70)
+print("🔄 Performing Cross-Validation")
+print("=" * 70)
+cv_scores = cross_val_score(rf_initial, X_train, y_train, cv=5, scoring='accuracy')
+print(f"✅ Cross-validation scores: {cv_scores}")
+print(f"✅ Mean CV Score: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+
+# Hyperparameter tuning
+print("\n" + "=" * 70)
+print("⚙️  Hyperparameter Tuning with GridSearchCV")
+print("=" * 70)
+
+param_grid = {
+    'n_estimators': [100, 200, 300],
+    'max_depth': [10, 20, 30, None],
+    'min_samples_split': [2, 5, 10],
+    'min_samples_leaf': [1, 2, 4],
+    'max_features': ['sqrt', 'log2']
+}
+
+print("⏳ This may take a few minutes...")
+grid_search = GridSearchCV(
+    RandomForestClassifier(random_state=42, n_jobs=-1),
+    param_grid,
+    cv=3,
+    scoring='accuracy',
+    n_jobs=-1,
+    verbose=1
+)
+
+grid_search.fit(X_train, y_train)
+
+print(f"\n✅ Best parameters found:")
+for param, value in grid_search.best_params_.items():
+    print(f"   {param}: {value}")
+print(f"\n✅ Best cross-validation score: {grid_search.best_score_:.4f}")
+
+# Train final model with best parameters
+print("\n" + "=" * 70)
+print("🎯 Training Final Model with Best Parameters")
+print("=" * 70)
+
+best_rf = grid_search.best_estimator_
+print("✅ Final model trained!")
+
+# Make predictions
+print("\n📊 Making predictions on test set...")
+y_pred = best_rf.predict(X_test)
+y_pred_proba = best_rf.predict_proba(X_test)[:, 1]
+
+# Evaluate the model
+print("\n" + "=" * 70)
+print("📊 MODEL EVALUATION RESULTS")
+print("=" * 70)
+
+accuracy = accuracy_score(y_test, y_pred)
+precision = precision_score(y_test, y_pred)
+recall = recall_score(y_test, y_pred)
+f1 = f1_score(y_test, y_pred)
+roc_auc = roc_auc_score(y_test, y_pred_proba)
+
+print(f"\n✅ Accuracy:  {accuracy:.4f} ({accuracy*100:.2f}%)")
+print(f"✅ Precision: {precision:.4f} ({precision*100:.2f}%)")
+print(f"✅ Recall:    {recall:.4f} ({recall*100:.2f}%)")
+print(f"✅ F1-Score:  {f1:.4f}")
+print(f"✅ ROC-AUC:   {roc_auc:.4f}")
+
+# Confusion Matrix
+print("\n📊 Confusion Matrix:")
+cm = confusion_matrix(y_test, y_pred)
+print(cm)
+print(f"\nTrue Negatives (Legitimate correctly identified): {cm[0][0]}")
+print(f"False Positives (Legitimate marked as Phishing): {cm[0][1]}")
+print(f"False Negatives (Phishing marked as Legitimate): {cm[1][0]}")
+print(f"True Positives (Phishing correctly identified): {cm[1][1]}")
+
+# Classification Report
+print("\n📋 Detailed Classification Report:")
+print(classification_report(y_test, y_pred, 
+                          target_names=['Legitimate', 'Phishing']))
+
+# Save the model
+print("\n" + "=" * 70)
+print("💾 Saving Model")
+print("=" * 70)
+
+model_filename = 'phishing_random_forest_model.pkl'
+joblib.dump(best_rf, model_filename)
+print(f"✅ Model saved as: {model_filename}")
+
+# Save label encoder
+encoder_filename = 'label_encoder.pkl'
+joblib.dump(le, encoder_filename)
+print(f"✅ Label encoder saved as: {encoder_filename}")
+
+# Save feature names
+feature_filename = 'feature_names.pkl'
+joblib.dump(X.columns.tolist(), feature_filename)
+print(f"✅ Feature names saved as: {feature_filename}")
+
+# Visualization
+print("\n" + "=" * 70)
+print("📊 Creating Visualizations")
+print("=" * 70)
+
+# Create a figure with multiple subplots
+fig = plt.figure(figsize=(16, 12))
+
+# 1. Feature Importance
+ax1 = plt.subplot(2, 3, 1)
+top_features = feature_importance.head(10)
+sns.barplot(data=top_features, y='feature', x='importance', palette='viridis', ax=ax1)
+ax1.set_title('Top 10 Most Important Features', fontsize=14, fontweight='bold')
+ax1.set_xlabel('Importance Score')
+ax1.set_ylabel('Feature')
+
+# 2. Confusion Matrix Heatmap
+ax2 = plt.subplot(2, 3, 2)
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=True, ax=ax2,
+            xticklabels=['Legitimate', 'Phishing'],
+            yticklabels=['Legitimate', 'Phishing'])
+ax2.set_title('Confusion Matrix', fontsize=14, fontweight='bold')
+ax2.set_ylabel('True Label')
+ax2.set_xlabel('Predicted Label')
+
+# 3. ROC Curve
+ax3 = plt.subplot(2, 3, 3)
+fpr, tpr, thresholds = roc_curve(y_test, y_pred_proba)
+ax3.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (AUC = {roc_auc:.4f})')
+ax3.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--', label='Random Classifier')
+ax3.set_xlim([0.0, 1.0])
+ax3.set_ylim([0.0, 1.05])
+ax3.set_xlabel('False Positive Rate')
+ax3.set_ylabel('True Positive Rate')
+ax3.set_title('ROC Curve', fontsize=14, fontweight='bold')
+ax3.legend(loc="lower right")
+ax3.grid(True, alpha=0.3)
+
+# 4. Label Distribution
+ax4 = plt.subplot(2, 3, 4)
+label_counts = df['label'].value_counts()
+colors = ['#4CAF50', '#FF5252']
+ax4.bar(label_counts.index, label_counts.values, color=colors)
+ax4.set_title('Dataset Label Distribution', fontsize=14, fontweight='bold')
+ax4.set_ylabel('Count')
+ax4.set_xlabel('Label')
+for i, v in enumerate(label_counts.values):
+    ax4.text(i, v + 10, str(v), ha='center', fontweight='bold')
+
+# 5. Model Comparison Metrics
+ax5 = plt.subplot(2, 3, 5)
+metrics = ['Accuracy', 'Precision', 'Recall', 'F1-Score', 'ROC-AUC']
+values = [accuracy, precision, recall, f1, roc_auc]
+colors_metrics = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336']
+bars = ax5.barh(metrics, values, color=colors_metrics)
+ax5.set_xlim([0, 1])
+ax5.set_title('Model Performance Metrics', fontsize=14, fontweight='bold')
+ax5.set_xlabel('Score')
+for i, (bar, value) in enumerate(zip(bars, values)):
+    ax5.text(value + 0.01, i, f'{value:.4f}', va='center', fontweight='bold')
+
+# 6. Prediction Distribution
+ax6 = plt.subplot(2, 3, 6)
+pred_counts = pd.Series(y_pred).value_counts()
+pred_labels = ['Legitimate', 'Phishing']
+ax6.pie(pred_counts.values, labels=pred_labels, autopct='%1.1f%%', 
+        colors=['#4CAF50', '#FF5252'], startangle=90)
+ax6.set_title('Test Set Predictions Distribution', fontsize=14, fontweight='bold')
+
+plt.tight_layout()
+plt.savefig('phishing_detection_analysis.png', dpi=300, bbox_inches='tight')
+print("✅ Visualization saved as: phishing_detection_analysis.png")
+plt.show()
+
+# Example prediction function
+print("\n" + "=" * 70)
+print("🔮 Example: Predicting New URLs")
+print("=" * 70)
+
+def predict_url(url_features, model, feature_names):
+    """
+    Predict if a URL is phishing or legitimate
+    
+    Parameters:
+    url_features: dict with feature values
+    model: trained Random Forest model
+    feature_names: list of feature names in correct order
+    """
+    # Create dataframe with features in correct order
+    features_df = pd.DataFrame([url_features])[feature_names]
+    
+    # Make prediction
+    prediction = model.predict(features_df)[0]
+    probability = model.predict_proba(features_df)[0]
+    
+    label = "PHISHING" if prediction == 1 else "LEGITIMATE"
+    confidence = probability[prediction] * 100
+    
+    return label, confidence
+
+# Example URLs to test
+example_urls = [
+    {
+        'name': 'google.com',
+        'features': {
+            'domain_length': 10, 'has_https': 1, 'has_ip': 0, 'num_hyphens': 0,
+            'num_digits': 0, 'num_subdomains': 1, 'suspicious_keywords': 0,
+            'suspicious_tld': 0, 'has_at_symbol': 0, 'url_length': 18,
+            'double_slash_path': 0, 'num_dots': 1, 'has_port': 0,
+            'entropy': 2.1234, 'num_special_chars': 0
+        }
+    },
+    {
+        'name': 'paypal-secure-login.tk',
+        'features': {
+            'domain_length': 25, 'has_https': 0, 'has_ip': 0, 'num_hyphens': 3,
+            'num_digits': 0, 'num_subdomains': 2, 'suspicious_keywords': 1,
+            'suspicious_tld': 1, 'has_at_symbol': 0, 'url_length': 32,
+            'double_slash_path': 0, 'num_dots': 2, 'has_port': 0,
+            'entropy': 3.4567, 'num_special_chars': 0
+        }
+    }
+]
+
+print("\n🧪 Testing predictions on example URLs:\n")
+for example in example_urls:
+    label, confidence = predict_url(example['features'], best_rf, X.columns.tolist())
+    print(f"URL: {example['name']}")
+    print(f"   Prediction: {label}")
+    print(f"   Confidence: {confidence:.2f}%")
+    print()
+
+print("\n" + "=" * 70)
+print("✅ MODEL TRAINING COMPLETE!")
+print("=" * 70)
+print(f"\n📊 Final Model Performance:")
+print(f"   • Accuracy:  {accuracy*100:.2f}%")
+print(f"   • Precision: {precision*100:.2f}%")
+print(f"   • Recall:    {recall*100:.2f}%")
+print(f"   • F1-Score:  {f1:.4f}")
+print(f"\n💾 Saved Files:")
+print(f"   • {model_filename}")
+print(f"   • {encoder_filename}")
+print(f"   • {feature_filename}")
+print(f"   • phishing_detection_analysis.png")
+print("\n🎯 Ready to detect phishing URLs!")
+print("=" * 70)
